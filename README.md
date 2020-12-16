@@ -1,11 +1,8 @@
-## My Project
+## Sharing Amazon ECR repositories with multiple accounts using AWS Organizations
 
-TODO: Fill this README out!
+Dockerfiles and CloudFormation templates for blog "Sharing Amazon ECR repositories with multiple accounts using AWS
+Organizations"
 
-Be sure to:
-
-* Change the title in this README
-* Edit your repository description on GitHub
 
 ## Security
 
