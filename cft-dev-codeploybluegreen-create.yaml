@@ -1,0 +1,223 @@
+Parameters:
+  Vpc:
+    Type: 'AWS::EC2::VPC::Id'
+  Subnet1:
+    Type: 'AWS::EC2::Subnet::Id'
+  Subnet2:
+    Type: 'AWS::EC2::Subnet::Id'
+  ImageUri:
+      Description: Please enter the container image URI
+      Type: String
+Transform:
+  - 'AWS::CodeDeployBlueGreen'
+Hooks:
+  DemoCodeDeployBlueGreenHook:
+    Properties:
+      TrafficRoutingConfig:
+        Type: AllAtOnce
+        AdditionalOptions:
+          TerminationWaitTimeInMinutes: 2
+      Applications:
+        - Target:
+            Type: 'AWS::ECS::Service'
+            LogicalID: DemoECSService
+          ECSAttributes:
+            TaskDefinitions:
+              - DemoBlueTaskDefinition
+              - DemoGreenTaskDefinition
+            TaskSets:
+              - DemoBlueTaskSet
+              - DemoGreenTaskSet
+            TrafficRouting:
+              ProdTrafficRoute:
+                Type: 'AWS::ElasticLoadBalancingV2::Listener'
+                LogicalID: DemoALBListenerProdTraffic
+              TargetGroups:
+                - DemoALBTargetGroupBlue
+                - DemoALBTargetGroupGreen
+    Type: 'AWS::CodeDeploy::BlueGreen'
+Resources:
+  DemoALBSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: Security group for ec2 access
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+  DemoECSSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: Security group for ALB
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - IpProtocol: -1
+          SourceSecurityGroupId: !Ref DemoALBSecurityGroup
+  DemoALBTargetGroupBlue:
+    Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
+    Properties:
+      HealthCheckIntervalSeconds: 5
+      HealthCheckPath: /
+      HealthCheckPort: '80'
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 2
+      HealthyThresholdCount: 2
+      Matcher:
+        HttpCode: '200'
+      Port: 80
+      Protocol: HTTP
+      Tags:
+        - Key: Group
+          Value: Demo
+      TargetType: ip
+      UnhealthyThresholdCount: 4
+      VpcId: !Ref Vpc
+  DemoALBTargetGroupGreen:
+    Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
+    Properties:
+      HealthCheckIntervalSeconds: 5
+      HealthCheckPath: /
+      HealthCheckPort: '80'
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 2
+      HealthyThresholdCount: 2
+      Matcher:
+        HttpCode: '200'
+      Port: 80
+      Protocol: HTTP
+      Tags:
+        - Key: Group
+          Value: Example
+      TargetType: ip
+      UnhealthyThresholdCount: 4
+      VpcId: !Ref Vpc
+  DemoALB:
+    Type: 'AWS::ElasticLoadBalancingV2::LoadBalancer'
+    Properties:
+      Scheme: internet-facing
+      SecurityGroups:
+        - !Ref DemoALBSecurityGroup
+      Subnets:
+        - !Ref Subnet1
+        - !Ref Subnet2
+      Tags:
+        - Key: Group
+          Value: Example
+      Type: application
+      IpAddressType: ipv4
+  DemoALBListenerProdTraffic:
+    Type: 'AWS::ElasticLoadBalancingV2::Listener'
+    Properties:
+      DefaultActions:
+        - Type: forward
+          ForwardConfig:
+            TargetGroups:
+              - TargetGroupArn: !Ref DemoALBTargetGroupBlue
+                Weight: 1
+      LoadBalancerArn: !Ref DemoALB
+      Port: 80
+      Protocol: HTTP
+  DemoALBListenerProdRule:
+    Type: 'AWS::ElasticLoadBalancingV2::ListenerRule'
+    Properties:
+      Actions:
+        - Type: forward
+          ForwardConfig:
+            TargetGroups:
+              - TargetGroupArn: !Ref DemoALBTargetGroupBlue
+                Weight: 1
+      Conditions:
+        - Field: http-header
+          HttpHeaderConfig:
+            HttpHeaderName: User-Agent
+            Values:
+              - Mozilla
+      ListenerArn: !Ref DemoALBListenerProdTraffic
+      Priority: 1
+  DemoECSTaskExecutionRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Sid: ''
+            Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy'
+  DemoBlueTaskDefinition:
+    Type: 'AWS::ECS::TaskDefinition'
+    Properties:
+      ExecutionRoleArn: !GetAtt
+        - DemoECSTaskExecutionRole
+        - Arn
+      ContainerDefinitions:
+        - Name: demoecshwapp
+          Image: !Ref ImageUri
+          Essential: true
+          PortMappings:
+            - HostPort: 80
+              Protocol: tcp
+              ContainerPort: 80
+      RequiresCompatibilities:
+        - FARGATE
+      NetworkMode: awsvpc
+      Cpu: '256'
+      Memory: '512'
+      Family: ecs-demo
+  DemoECSCluster:
+    Type: 'AWS::ECS::Cluster'
+    Properties: {}
+  DemoECSService:
+    Type: 'AWS::ECS::Service'
+    Properties:
+      Cluster: !Ref DemoECSCluster
+      DesiredCount: 1
+      DeploymentController:
+        Type: EXTERNAL
+  DemoBlueTaskSet:
+    Type: 'AWS::ECS::TaskSet'
+    Properties:
+      Cluster: !Ref DemoECSCluster
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsVpcConfiguration:
+          AssignPublicIp: ENABLED
+          SecurityGroups:
+            - !Ref DemoECSSecurityGroup
+          Subnets:
+            - !Ref Subnet1
+            - !Ref Subnet2
+      PlatformVersion: 1.3.0
+      Scale:
+        Unit: PERCENT
+        Value: 1
+      Service: !Ref DemoECSService
+      TaskDefinition: !Ref DemoBlueTaskDefinition
+      LoadBalancers:
+        - ContainerName: demoecshwapp
+          ContainerPort: 80
+          TargetGroupArn: !Ref DemoALBTargetGroupBlue
+  DemoPrimaryTaskSet:
+    Type: 'AWS::ECS::PrimaryTaskSet'
+    Properties:
+      Cluster: !Ref DemoECSCluster
+      Service: !Ref DemoECSService
+      TaskSetId: !GetAtt
+        - DemoBlueTaskSet
+        - Id
+Outputs:
+  LoadBalancerDNSName:
+    Value: !GetAtt DemoALB.DNSName

@@ -1,0 +1,35 @@
+Parameters:
+  OrgID:
+    Description: Please enter the Organization ID
+    Type: String
+  DevOrgUnitID:
+    Description: Please enter the Development Organization Unit ID
+    Type: String
+
+
+Resources:
+  DemoECRRepoDev:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: demoecshwapp-ecr-repo
+      RepositoryPolicyText:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Sid: AllowPull
+            Effect: Allow
+            Principal: "*"
+            Action:
+              - "ecr:GetDownloadUrlForLayer"
+              - "ecr:BatchGetImage"
+              - "ecr:BatchCheckLayerAvailability"
+              - "ecr:DescribeImages"
+              - "ecr:DescribeRepositories"
+            Condition:
+              ForAnyValue:StringLike:
+                aws:PrincipalOrgPaths:
+                  - !Sub ${OrgID}/*/${DevOrgUnitID}/*
+
+Outputs:
+  ImageRepoName:
+    Value: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${DemoECRRepoDev}
